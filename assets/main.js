@@ -79,6 +79,7 @@ const UNIFORM_DATA = {
 const SHARED_ITEMS = [
   { id: 'shared_ao_gio', name: 'Áo khoác gió', price: 650000 },
   { id: 'shared_ao_ghile', name: 'Áo ghi lê len', price: 450000 },
+  { id: 'shared_ao_phong', name: 'Áo phông', price: 250000 },
 ];
 
 // ──────────── STATE ────────────
@@ -436,39 +437,204 @@ function recalculate() {
 }
 
 function exportPDF() {
-  // Gather summary
-  let summary = '=== BÁO CÁO CHI PHÍ ĐỒNG PHỤC ===\n\n';
-  TAB_KEYS.forEach(key => {
-    const group = UNIFORM_DATA[key];
-    const total = calcTabTotal(key);
-    if (total > 0) {
-      summary += `${group.textLabel}: ${formatVND(total)}`;
-      if (group.maxBudget) {
-        const diff = group.maxBudget - total;
-        summary += diff >= 0 ? ` (Tiết kiệm ${formatVND(diff)})` : ` (Vượt ${formatVND(Math.abs(diff))})`;
-      }
-      summary += '\n';
 
-      // Item details
-      const tabState = state[key];
-      group.items.forEach(item => {
-        const s = tabState[item.id];
-        if (s && s.qty > 0) {
-          summary += `  - ${item.name}: ${s.qty} x ${formatVND(item.price)} = ${formatVND(item.price * s.qty)}\n`;
-        }
-      });
-      SHARED_ITEMS.forEach(item => {
-        const s = tabState[item.id];
-        if (s && s.qty > 0) {
-          summary += `  - ${item.name} (chung): ${s.qty} x ${formatVND(item.price)} = ${formatVND(item.price * s.qty)}\n`;
-        }
-      });
-      summary += '\n';
-    }
+  const group = UNIFORM_DATA[activeTab];
+  const tabState = state[activeTab];
+  const grandTotal = calcTabTotal(activeTab);
+  const maxBudget = group.maxBudget;
+  const now = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const dateStr = `${pad(now.getDate())}/${pad(now.getMonth()+1)}/${now.getFullYear()} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+
+  // ── Gather row data ──────────────────────────────────────────
+  const rows = [];
+  group.items.forEach(item => {
+    const s = tabState[item.id];
+    if (s && s.qty > 0) rows.push({ name: item.name, qty: s.qty, price: item.price, total: item.price * s.qty, shared: false });
+  });
+  SHARED_ITEMS.forEach(item => {
+    const s = tabState[item.id];
+    if (s && s.qty > 0) rows.push({ name: item.name + ' (chung)', qty: s.qty, price: item.price, total: item.price * s.qty, shared: true });
   });
 
-  alert('Đã xuất file PDF!\n\n' + summary);
+  // ── Budget badge ─────────────────────────────────────────────
+  let badgeClass = '', badgeText = '';
+  if (maxBudget) {
+    const diff = maxBudget - grandTotal;
+    if (diff > 0)      { badgeClass = 'badge-green'; badgeText = `Tiết kiệm ${formatVND(diff)} so với định mức`; }
+    else if (diff < 0) { badgeClass = 'badge-red';   badgeText = `Vượt ${formatVND(Math.abs(diff))} so với định mức`; }
+    else               { badgeClass = 'badge-gold';  badgeText = 'Đúng định mức'; }
+  }
+
+  // ── Table rows ───────────────────────────────────────────────
+  const rowsHTML = rows.length === 0
+    ? `<tr><td colspan="4" class="empty">Chưa chọn mặt hàng nào.</td></tr>`
+    : rows.map((r, i) => `
+        <tr class="${i % 2 === 0 ? 'row-even' : 'row-odd'}${r.shared ? ' row-shared' : ''}">
+          <td class="col-name">${r.name}</td>
+          <td class="col-center">${r.qty}</td>
+          <td class="col-gold col-center">${formatVND(r.price)}</td>
+          <td class="col-right col-bold">${formatVND(r.total)}</td>
+        </tr>`).join('');
+
+  // ── Per-tab summary rows (all tabs) ──────────────────────────
+  const summaryRows = TAB_KEYS.map(key => {
+    const t = calcTabTotal(key);
+    if (t === 0) return '';
+    const g = UNIFORM_DATA[key];
+    return `<tr><td>${g.textLabel}</td><td class="col-right col-bold col-gold">${formatVND(t)}</td></tr>`;
+  }).join('');
+
+  const html = `<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Báo cáo - ${group.textLabel}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box;}
+    body{font-family:'Be Vietnam Pro',sans-serif;background:#f0f4f8;color:#1a2a3a;font-size:14px;}
+    .page{max-width:820px;margin:24px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,31,63,.15);}
+
+    /* Header */
+    .header{background:#001F3F;padding:28px 36px 22px;color:#fff;}
+    .header-top{display:flex;justify-content:space-between;align-items:flex-start;}
+    .header-logo{display:flex;align-items:center;gap:10px;}
+    .logo-icon{width:40px;height:40px;background:#D4AF77;border-radius:8px;display:flex;align-items:center;justify-content:center;}
+    .logo-icon svg{width:24px;height:24px;stroke:#001F3F;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;}
+    .header-title h1{font-size:20px;font-weight:700;color:#D4AF77;line-height:1.2;}
+    .header-title p{font-size:12px;color:#7fa8d4;margin-top:2px;}
+    .header-meta{text-align:right;font-size:11px;color:#7fa8d4;line-height:1.8;}
+    .header-meta strong{color:#E8D5B5;}
+    .divider-gold{height:2px;background:linear-gradient(90deg,transparent,#D4AF77,transparent);margin-top:18px;}
+
+    /* Section */
+    .section{padding:28px 36px;}
+    .section-title{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#001F3F;border-left:3px solid #D4AF77;padding-left:10px;margin-bottom:16px;}
+
+    /* Table */
+    table{width:100%;border-collapse:collapse;font-size:13px;}
+    thead tr{background:#001F3F;color:#E8D5B5;}
+    thead th{padding:10px 12px;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.07em;}
+    .row-even{background:#f8fafc;}
+    .row-odd{background:#fff;}
+    .row-shared td{opacity:.82;}
+    td{padding:9px 12px;border-bottom:1px solid #e8edf2;color:#1a2a3a;vertical-align:middle;}
+    .col-center{text-align:center;}
+    .col-right{text-align:right;}
+    .col-bold{font-weight:600;}
+    .col-gold{color:#B8944D;}
+    .empty{text-align:center;padding:24px;color:#94a3b8;font-style:italic;}
+    .total-row td{background:#001F3F;color:#D4AF77;font-weight:700;font-size:15px;padding:12px;border:none;}
+    .total-row td:first-child{border-radius:0 0 0 6px;}
+    .total-row td:last-child{border-radius:0 0 6px 0;}
+
+    /* Badge */
+    .badge{display:inline-block;padding:8px 20px;border-radius:20px;font-weight:600;font-size:13px;margin-top:14px;}
+    .badge-green{background:#dcfce7;color:#166534;}
+    .badge-red{background:#fee2e2;color:#991b1b;}
+    .badge-gold{background:#fef9c3;color:#854d0e;}
+
+    /* Summary */
+    .summary-box{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;}
+    .summary-box table{font-size:13px;}
+    .summary-box td{padding:8px 14px;border-bottom:1px solid #e8edf2;}
+    .summary-box tr:last-child td{border-bottom:none;}
+
+    /* Footer */
+    .report-footer{background:#001F3F;padding:14px 36px;display:flex;justify-content:space-between;align-items:center;}
+    .report-footer span{font-size:11px;color:#527aab;}
+    .report-footer strong{color:#D4AF77;}
+
+    /* Print button */
+    .print-bar{background:#fff;padding:16px 36px;display:flex;gap:12px;border-top:1px solid #e2e8f0;}
+    .btn-print{background:#001F3F;color:#D4AF77;border:none;padding:10px 24px;border-radius:6px;font-family:'Be Vietnam Pro',sans-serif;font-size:14px;font-weight:600;cursor:pointer;}
+    .btn-print:hover{background:#002B57;}
+    .btn-close{background:transparent;color:#64748b;border:1px solid #cbd5e1;padding:10px 20px;border-radius:6px;font-family:'Be Vietnam Pro',sans-serif;font-size:14px;cursor:pointer;}
+    .btn-close:hover{background:#f1f5f9;}
+
+    @page{margin:15mm 10mm;}
+    @media print{
+      body{background:#fff;}
+      .page{margin:0;border-radius:0;box-shadow:none;}
+      thead tr{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+      .total-row td{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+      .header{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+      .report-footer{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <div class="header">
+    <div class="header-top">
+      <div class="header-logo">
+        <div class="logo-icon">
+          <svg viewBox="0 0 24 24"><path d="M20 7H4a2 2 0 00-2 2v6a2 2 0 002 2h16a2 2 0 002-2V9a2 2 0 00-2-2z"/><path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2"/></svg>
+        </div>
+        <div class="header-title">
+          <h1>Báo Cáo Chi Phí Đồng Phục</h1>
+          <p>${group.textLabel}</p>
+        </div>
+      </div>
+      <div class="header-meta">
+        <div>Ngày xuất: <strong>${dateStr}</strong></div>
+        ${maxBudget ? `<div>Định mức: <strong>${formatVND(maxBudget)}</strong></div>` : ''}
+      </div>
+    </div>
+    <div class="divider-gold"></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Chi tiết đặt hàng</div>
+    <table>
+      <thead>
+        <tr>
+          <th style="text-align:left">Tên hàng</th>
+          <th style="text-align:center;width:60px">SL</th>
+          <th style="text-align:center;width:140px">Đơn giá</th>
+          <th style="text-align:right;width:150px">Thành tiền</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rowsHTML}
+        <tr class="total-row">
+          <td colspan="3">Tổng chi phí</td>
+          <td class="col-right">${formatVND(grandTotal)}</td>
+        </tr>
+      </tbody>
+    </table>
+    ${badgeText ? `<div><span class="badge ${badgeClass}">${badgeText}</span></div>` : ''}
+  </div>
+
+  ${summaryRows ? `
+  <div class="section" style="padding-top:0">
+    <div class="section-title">Tổng hợp tất cả nhóm</div>
+    <div class="summary-box">
+      <table>${summaryRows}</table>
+    </div>
+  </div>` : ''}
+
+  <div class="report-footer">
+    <span>Tính Chi Phí Đồng Phục Doanh Nghiệp</span>
+    <span>Tài liệu được tạo tự động</span>
+  </div>
+
+</div>
+</body>
+</html>`;
+
+  const frame = document.getElementById('print-frame');
+  frame.onload = function () {
+    frame.contentWindow.focus();
+    frame.contentWindow.print();
+  };
+  frame.srcdoc = html;
 }
+
 
 // ──────────── KEYBOARD SHORTCUT ────────────
 document.addEventListener('keydown', function (e) {
